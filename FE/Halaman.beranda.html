@@ -494,13 +494,189 @@
 <script src="config.js"></script>
 <script>
 const API_URL = CONFIG.API_BASE_URL;
+let allProducts = []; // Store products globally
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Check authentication
+    const token = localStorage.getItem('token');
+    if (!token) {
+        window.location.href = 'login.html';
+        return;
+    }
+    
     // Add small delay to ensure DOM is fully ready
     setTimeout(function() {
+        loadProducts(); // Load products from API
         setupAllButtons();
     }, 100);
 });
+
+// Load products from API
+async function loadProducts() {
+    try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API_URL}/products`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!res.ok) throw new Error('Gagal memuat produk');
+        
+        const data = await res.json();
+        console.log('API Response full structure:', data);
+        
+        // Handle paginated response from Laravel
+        // API returns: { success, message, data: { data: [...], meta, links } }
+        let productArray = [];
+        
+        if (data.data) {
+            if (Array.isArray(data.data)) {
+                // data.data is array directly
+                productArray = data.data;
+            } else if (data.data.data && Array.isArray(data.data.data)) {
+                // data.data is pagination object with nested .data array
+                productArray = data.data.data;
+            }
+        } else if (Array.isArray(data)) {
+            productArray = data;
+        }
+        
+        allProducts = productArray;
+        console.log('Parsed products array:', allProducts);
+        console.log('Sample product IDs:', allProducts.slice(0, 3).map(p => ({ id: p.id, name: p.name })));
+        
+        // Render products ke halaman
+        renderProducts(allProducts);
+        
+        // Setup event listeners setelah render selesai
+        requestAnimationFrame(() => {
+            setupProductCards();
+        });
+        
+    } catch (err) {
+        console.error('Error loading products:', err);
+        // Fallback: continue with dummy data if API fails
+    }
+}
+
+// Render products to recommendation section
+function renderProducts(products) {
+    // Find recommendation section
+    const recSection = document.querySelector('section:last-of-type');
+    if (!recSection) {
+        console.error('Recommendation section not found');
+        return;
+    }
+    
+    // Find the grid container within the section
+    let productGrid = recSection.querySelector('div.grid');
+    if (!productGrid) {
+        console.error('Product grid in recommendation section not found');
+        return;
+    }
+    
+    console.log('Found product grid in recommendation:', productGrid);
+    
+    // If we have products from API, replace cards
+    if (products && products.length > 0) {
+        // Clear existing cards
+        const existingCards = productGrid.querySelectorAll('div.bg-surface-light');
+        existingCards.forEach(card => card.remove());
+        
+        console.log('Cleared grid, now rendering', products.length, 'products');
+        
+        // Create new cards from API data
+        products.slice(0, 6).forEach((product, index) => {
+            const card = document.createElement('div');
+            card.className = 'bg-surface-light dark:bg-surface-dark border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden hover:shadow-lg transition-all cursor-pointer flex flex-col h-full';
+            card.setAttribute('data-product-id', String(product.id));
+            
+            const price = parseInt(product.price);
+            const originalPrice = Math.floor(price * 1.2);
+            
+            const imageUrl = (product.image_urls && product.image_urls.length > 0) 
+                ? product.image_urls[0] 
+                : 'https://via.placeholder.com/200?text=' + encodeURIComponent(product.name);
+            
+            card.innerHTML = `
+                <div class="relative aspect-square overflow-hidden bg-gray-100 dark:bg-gray-800">
+                    <img src="${imageUrl}" alt="${product.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                </div>
+                <div class="p-4 flex flex-col flex-1">
+                    <h3 class="font-semibold text-gray-900 dark:text-white line-clamp-2 mb-2">
+                        ${product.name}
+                    </h3>
+                    <div class="mt-auto">
+                        <div class="flex items-baseline gap-2 mb-2">
+                            <span class="text-lg font-bold text-primary">Rp ${price.toLocaleString('id-ID')}</span>
+                            <span class="text-sm text-gray-400 line-through">Rp ${originalPrice.toLocaleString('id-ID')}</span>
+                        </div>
+                        <div class="flex items-center gap-1 text-xs text-gray-500">
+                            <span class="material-symbols-outlined text-[14px] text-yellow-400 fill-1" style="font-variation-settings: 'FILL' 1;">star</span>
+                            <span class="text-gray-900 dark:text-white font-medium">4.8</span>
+                            <span>|</span>
+                            <span>Terjual 100+</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            productGrid.appendChild(card);
+        });
+        
+        console.log('Rendered', Math.min(6, products.length), 'products');
+    }
+}
+
+// Setup product card click handlers
+function setupProductCards() {
+    const recSection = document.querySelector('section:last-of-type');
+    if (!recSection) return;
+    
+    const productCards = recSection.querySelectorAll('div.bg-surface-light.dark\\:bg-surface-dark.border');
+    
+    console.log('setupProductCards: Found', productCards.length, 'cards');
+    
+    productCards.forEach((card, index) => {
+        const productId = card.getAttribute('data-product-id');
+        console.log(`Card ${index}: data-product-id = "${productId}"`);
+        
+        if (!productId) {
+            console.warn(`Card ${index} has no data-product-id, skipping...`);
+            return;
+        }
+        
+        card.addEventListener('click', function(e) {
+            if (e.target.closest('button')) {
+                return;
+            }
+            
+            e.preventDefault();
+            
+            const clickedProductId = this.getAttribute('data-product-id');
+            console.log('Product clicked, ID:', clickedProductId);
+            
+            if (!clickedProductId) {
+                alert('Produk tidak ditemukan');
+                return;
+            }
+            
+            sessionStorage.setItem('selectedProductId', clickedProductId);
+            
+            const product = allProducts.find(p => String(p.id) === String(clickedProductId));
+            if (product) {
+                sessionStorage.setItem('currentProduct', JSON.stringify(product));
+                console.log('Stored product data:', product);
+            }
+            
+            window.location.href = 'halaman.detail.produk.html';
+        });
+    });
+}
+
 
 function setupAllButtons() {
     // Check if user is authenticated
@@ -770,12 +946,6 @@ function handleSearch() {
         sessionStorage.setItem('searchQuery', query);
     }
     window.location.href = 'halaman.daftar.produk.html';
-}
-
-// Check authentication on page load
-const token = localStorage.getItem('token');
-if (!token) {
-    console.log('User tidak authenticated');
 }
 </script>
 
